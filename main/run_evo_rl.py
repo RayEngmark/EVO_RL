@@ -57,7 +57,8 @@ class SimpleTrackManiaEnv:
 # === Training Loop ===
 def train_evo_rl():
     env = SimpleTrackManiaEnv()
-    agent = Agent(state_dim=3, action_dim=2)
+    agent = Agent(state_dim=3, action_dim=2, epsilon_start=1.0, epsilon_min=0.05, epsilon_decay=0.995)
+
     replay_buffer = ReplayBuffer(capacity=10000)
     
     num_episodes = 1000
