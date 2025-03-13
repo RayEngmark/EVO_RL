@@ -6,18 +6,38 @@ import numpy as np
 from network.model import NeuralNetwork
 
 class Agent:
-    def __init__(self, state_dim, action_dim, lr=0.001):
+    def __init__(self, state_dim, action_dim, lr=0.001, epsilon_start=1.0, epsilon_min=0.01, epsilon_decay=0.997):
         self.model = NeuralNetwork(state_dim, action_dim)
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
         self.criterion = nn.MSELoss()
+        
+       # Epsilon parameters
+        self.epsilon = epsilon_start
+        self.epsilon_min = 0.10  # Øker minimumsverdien for å sikre utforskning
+        self.epsilon_decay = 0.999  # Gjør nedgangen enda tregere
 
-    def select_action(self, state, epsilon=0.1):
-        """Velger handling basert på epsilon-greedy policy."""
-        if random.random() < epsilon:
-            return random.randint(0, 1)  # Tilfeldig handling (for utforskning)
+
+        # Debug: Sjekk at epsilon starter riktig
+        print(f"[DEBUG] Initial epsilon: {self.epsilon:.4f}, Min: {self.epsilon_min:.4f}, Decay: {self.epsilon_decay:.4f}")
+
+
+    def select_action(self, state):
+        """Epsilon-greedy action selection with dynamic decay."""
+        if random.random() < self.epsilon:
+            action = random.randint(0, 1)  # Utforskning
         else:
             state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
-            return torch.argmax(self.model(state_tensor)).item()
+            action = torch.argmax(self.model(state_tensor)).item()
+
+        # Decay epsilon
+        self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
+        print(f"[DEBUG] Epsilon: {self.epsilon:.4f}")
+
+        return action
+
+        
+
+
 
     def train(self, replay_buffer, batch_size, gamma=0.99):
         """Trener agenten basert på erfaringer fra replay-bufferet."""
