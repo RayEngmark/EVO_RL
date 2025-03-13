@@ -1,16 +1,13 @@
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import random
 import collections
+import random
+import numpy as np
 
-# === Replay Buffer ===
 class ReplayBuffer:
     def __init__(self, capacity):
-        self.buffer = collections.deque(maxlen=capacity)
-    
-    def add(self, state, action, reward, next_state, done):
+        self.buffer = collections.deque(maxlen=capacity)  # ✅ Beholder init
+
+    def push(self, state, action, reward, next_state, done):  # ✅ Endret add() til push()
         self.buffer.append((state, action, reward, next_state, done))
         print(f"[DEBUG] Added to buffer: State: {state}, Action: {action}, Reward: {reward}, Done: {done}")
 
@@ -18,7 +15,7 @@ class ReplayBuffer:
         batch = random.sample(self.buffer, batch_size)
         states, actions, rewards, next_states, dones = zip(*batch)
         return np.array(states), np.array(actions), np.array(rewards), np.array(next_states), np.array(dones)
-    
+
     def size(self):
         return len(self.buffer)
 

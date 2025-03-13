@@ -103,7 +103,7 @@ def train_evo_rl():
 
     # === Lagre modellen etter trening ===
     print("🚀 model saved to model.pth...")
-    torch.save(agent.model.state_dict(), "model.pth")
+    torch.save(agent.model.state_dict(), "models/model.pth")
     print("✅ Model saved!")
 
 if __name__ == "__main__":
