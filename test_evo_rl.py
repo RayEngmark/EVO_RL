@@ -9,7 +9,7 @@ from main.run_evo_rl import SimpleTrackManiaEnv
 state_dim = 3  # Samme som under trening
 action_dim = 2  # Samme som under trening
 agent = Agent(state_dim, action_dim)
-agent.model.load_state_dict(torch.load("model.pth"))
+agent.model.load_state_dict(torch.load("main/model.pth"))
 agent.model.eval()
 agent.epsilon = 1.0  # Reset epsilon manually after loading model
 
