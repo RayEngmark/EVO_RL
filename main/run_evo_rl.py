@@ -89,7 +89,7 @@ def train_evo_rl():
             # Bruk den nye belønningsfunksjonen
             reward = env.reward_function(state, action, next_state)  # ✅ Fikset kall
 
-            replay_buffer.push(state, action, reward, next_state, done)  # ✅ Fikset minnebuffer
+            replay_buffer.add(state, action, reward, next_state, done)  # ✅ Fikset minnebuffer
 
             state = next_state
             total_reward += reward
