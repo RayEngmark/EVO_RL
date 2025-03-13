@@ -1,5 +1,5 @@
 from training.agent import Agent
-from memory.replay_buffer import ReplayBuffer
+from memory.replay_buffer import PrioritizedReplayBuffer  # Bruk PER
 import numpy as np
 import torch
 import os
@@ -30,7 +30,6 @@ class SimpleTrackManiaEnv:
         self.done = False
         self.state = np.array([self.position, self.speed, 0.0])  # Posisjon, fart, dummy-verdi
         
-        print("[RESET] AI is starting over.")
         return self.state
 
     def step(self, action):
@@ -60,7 +59,7 @@ class SimpleTrackManiaEnv:
             print(f"[INFO] AI came to a complete stop (straff)")
 
         # Debugging-logg
-        print(f"[STEP] pos: {self.position:.1f}, speed: {self.speed:.1f}, reward: {reward:.2f}, done: {self.done}")
+        #print(f"[STEP] pos: {self.position:.1f}, speed: {self.speed:.1f}, reward: {reward:.2f}, done: {self.done}")
 
         self.state = np.array([self.position, self.speed, 0.0])
         return self.state, reward, self.done
@@ -119,7 +118,7 @@ def train_evo_rl():
     # Opprett miljø og agent
     env = SimpleTrackManiaEnv()
     agent = Agent(state_dim=3, action_dim=2, epsilon_start=1.0, epsilon_min=0.05, epsilon_decay=0.995)
-    replay_buffer = ReplayBuffer(capacity=10000)
+    replay_buffer = PrioritizedReplayBuffer(capacity=10000, alpha=0.6)
 
     num_episodes = 1000
     max_timesteps = 200
@@ -133,21 +132,48 @@ def train_evo_rl():
             action = agent.select_action(state)
             next_state, _, done = env.step(action)
 
+            if done:  # 🚨 Hvis episoden er ferdig, bryt ut av loopen
+                print(f"Episode {episode}/{num_episodes} completed. Total reward: {total_reward:.2f}, Epsilon: {agent.epsilon:.4f}")
+                break  
+
             # Bruk belønningsfunksjonen
             reward = env.reward_function(state, action, next_state)
 
             # Legg til i replay buffer
             replay_buffer.push(state, action, reward, next_state, done)
 
+            if replay_buffer.size() > batch_size:
+                states, actions, rewards, next_states, dones, indices, weights = replay_buffer.sample(batch_size)
+                agent.train(replay_buffer, states, actions, rewards, next_states, dones, indices, weights, batch_size)
+
+
+
             state = next_state
             total_reward += reward
 
-            if done:
-                break
-            
-            print(f"[DEBUG] Episode: {episode}, Epsilon: {agent.epsilon:.4f}, Action: {action}, Reward: {reward}")
+            # Sjekk om denne episoden har høyest reward
+            best_model_path = os.path.join(session_path, "best.pth")
+            metadata_path = os.path.join(session_path, "metadata.json")
 
-        print(f"Episode {episode} completed. Total reward: {total_reward:.2f}")
+            if not os.path.exists(metadata_path):
+                best_reward = -float("inf")  # Ingen tidligere reward
+            else:
+                with open(metadata_path, "r") as f:
+                    metadata = json.load(f)
+                best_reward = metadata.get("best_reward", -float("inf"))
+
+            if total_reward > best_reward:
+                print(f"🏆 New best model found! Reward: {total_reward:.2f}")
+                torch.save(agent.model.state_dict(), best_model_path)
+                best_reward = total_reward
+
+            # Oppdater metadata
+            metadata = {"epsilon": agent.epsilon, "best_reward": best_reward}
+            with open(metadata_path, "w") as f:
+                json.dump(metadata, f)
+
+
+       # print(f"Episode {episode} completed. Total reward: {total_reward:.2f}")
 
     # === Lagre modellen etter trening ===
     model_save_path = os.path.join(session_path, "latest.pth")
@@ -157,6 +183,34 @@ def train_evo_rl():
         json.dump(metadata, f)
     torch.save(agent.model.state_dict(), model_save_path)
     print(f"✅ Model saved to {model_save_path}")
+
+def evaluate_agent():
+    """Evaluerer den trente agenten uten tilfeldig utforsking (epsilon = 0)."""
+    session_id = get_next_session() - 1  # Bruk siste session
+    session_path = os.path.join(models_dir, f"session_{session_id}")
+    best_model_path = os.path.join(session_path, "best.pth")
+
+    if not os.path.exists(best_model_path):
+        print("❌ Ingen lagret modell for evaluering.")
+        return
+
+    print(f"🔍 Evaluating model from {best_model_path}...")
+    env = SimpleTrackManiaEnv()
+    agent = Agent(state_dim=3, action_dim=2, epsilon_start=0.0, epsilon_min=0.0, epsilon_decay=1.0)
+    agent.model.load_state_dict(torch.load(best_model_path))
+    
+    total_reward = 0
+    state = env.reset()
+    done = False
+
+    while not done:
+        action = agent.select_action(state)
+        state, reward, done = env.step(action)
+        total_reward += reward
+
+    print(f"🏁 Evaluation completed. Total Reward: {total_reward:.2f}")
+
+
 
 if __name__ == "__main__":
     train_evo_rl()

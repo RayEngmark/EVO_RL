@@ -57,28 +57,31 @@ class Agent:
 
         # Decay epsilon
         self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
-        print(f"[DEBUG] Epsilon: {self.epsilon:.4f}")
 
         return action
 
-    def train(self, replay_buffer, batch_size, gamma=0.99):
-        """Trener agenten basert på erfaringer fra replay-bufferet."""
-        if replay_buffer.size() < batch_size:
-            return
+    def train(self, replay_buffer, states, actions, rewards, next_states, dones, indices, weights, batch_size, gamma=0.99):
+        """Trener agenten basert på samples fra Prioritized Experience Replay."""
 
-        states, actions, rewards, next_states, dones = replay_buffer.sample(batch_size)
-        
         states_tensor = torch.tensor(states, dtype=torch.float32)
         actions_tensor = torch.tensor(actions, dtype=torch.long).unsqueeze(1)
         rewards_tensor = torch.tensor(rewards, dtype=torch.float32).unsqueeze(1)
         next_states_tensor = torch.tensor(next_states, dtype=torch.float32)
         dones_tensor = torch.tensor(dones, dtype=torch.float32).unsqueeze(1)
-        
+        weights_tensor = torch.tensor(weights, dtype=torch.float32).unsqueeze(1)
+
+        # Beregn Q-verdier
         current_q_values = self.model(states_tensor).gather(1, actions_tensor)
         next_q_values = self.model(next_states_tensor).max(1, keepdim=True)[0]
         target_q_values = rewards_tensor + gamma * next_q_values * (1 - dones_tensor)
+
+        # Beregn TD-error og oppdater Prioritized Replay Buffer
+        td_errors = (current_q_values - target_q_values.detach()).squeeze().abs().cpu().detach().numpy()
+        replay_buffer.update_priorities(indices, td_errors)  # ✅ Nå fungerer dette
+
+        # Beregn loss med vekting fra PER
+        loss = (weights_tensor * (current_q_values - target_q_values.detach())**2).mean()
         
-        loss = self.criterion(current_q_values, target_q_values.detach())
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
