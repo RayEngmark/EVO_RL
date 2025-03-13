@@ -11,6 +11,8 @@ action_dim = 2  # Samme som under trening
 agent = Agent(state_dim, action_dim)
 agent.model.load_state_dict(torch.load("model.pth"))
 agent.model.eval()
+agent.epsilon = 1.0  # Reset epsilon manually after loading model
+
 
 # Sett opp testmiljøet
 env = SimpleTrackManiaEnv()
