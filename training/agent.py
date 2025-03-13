@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import random
 import numpy as np
+import os  # 🔹 Viktig! Trengs for filoperasjoner
 from network.model import NeuralNetwork
 
 class Agent:
@@ -11,15 +12,40 @@ class Agent:
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
         self.criterion = nn.MSELoss()
         
-       # Epsilon parameters
+        # Epsilon-parametere
         self.epsilon = epsilon_start
         self.epsilon_min = 0.10  # Øker minimumsverdien for å sikre utforskning
         self.epsilon_decay = 0.999  # Gjør nedgangen enda tregere
-
-
-        # Debug: Sjekk at epsilon starter riktig
         print(f"[DEBUG] Initial epsilon: {self.epsilon:.4f}, Min: {self.epsilon_min:.4f}, Decay: {self.epsilon_decay:.4f}")
 
+        self.load_latest_model()  # 🔹 Flyttet modellinnlasting til egen funksjon
+
+    def get_latest_model(self):
+        """Henter siste tilgjengelige modell for automatisk opplasting."""
+        if not os.path.exists("models"):  # 🔹 Unngå krasj hvis 'models/' ikke finnes
+            return None
+
+        existing_sessions = sorted(
+            [int(folder.replace("session_", "")) for folder in os.listdir("models") if folder.startswith("session_")], 
+            reverse=True
+        )
+
+        for session in existing_sessions:
+            model_path = f"models/session_{session}/latest.pth"
+            if os.path.exists(model_path):
+                print(f"🔄 Loading model from {model_path}")
+                return model_path
+        
+        return None  # Ingen tidligere modell funnet
+
+    def load_latest_model(self):
+        """Laster inn den nyeste modellen hvis en finnes."""
+        latest_model = self.get_latest_model()
+        if latest_model:
+            self.model.load_state_dict(torch.load(latest_model))
+            print("✅ Model loaded successfully!")
+        else:
+            print("🆕 No previous model found. Training from scratch.")
 
     def select_action(self, state):
         """Epsilon-greedy action selection with dynamic decay."""
@@ -35,14 +61,11 @@ class Agent:
 
         return action
 
-        
-
-
-
     def train(self, replay_buffer, batch_size, gamma=0.99):
         """Trener agenten basert på erfaringer fra replay-bufferet."""
         if replay_buffer.size() < batch_size:
             return
+
         states, actions, rewards, next_states, dones = replay_buffer.sample(batch_size)
         
         states_tensor = torch.tensor(states, dtype=torch.float32)
