@@ -34,7 +34,7 @@ class SimpleTrackManiaEnv:
             self.speed = max(self.speed - 1.0, 0.0)  
 
         self.position += self.speed  
-        reward = self.speed / self.max_speed  
+        reward = (self.speed / self.max_speed) + (self.position / self.track_length)
 
         # Sluttbetingelser
         if self.position >= self.track_length:
@@ -53,6 +53,19 @@ class SimpleTrackManiaEnv:
         self.state = np.array([self.position, self.speed, 0.0])
         return self.state, reward, self.done
 
+    def reward_function(self, state, action, next_state):
+        """Ekstern belønningsfunksjon som kan modifiseres."""
+        pos, speed, _ = next_state
+
+        reward = (next_state[0] - state[0]) * 0.5  # Belønn progresjon
+        reward += next_state[1] * 0.2 if next_state[1] > state[1] else -0.2  # Belønn fart
+        if next_state[1] == 0:  
+            reward -= 5  # Straff for å stoppe
+        if next_state[0] % 10 == 0:  
+            reward += 1  # Bonus for sjekkpunkter
+
+        return reward
+
 
 # === Training Loop ===
 def train_evo_rl():
@@ -62,20 +75,31 @@ def train_evo_rl():
     replay_buffer = ReplayBuffer(capacity=10000)
     
     num_episodes = 1000
+    max_timesteps = 200  # Fikset manglende variabel
     batch_size = 32
     
     for episode in range(num_episodes):
         state = env.reset()
-        done = False
-        
-        while not done:
+        total_reward = 0
+
+        for t in range(max_timesteps):
             action = agent.select_action(state)
-            next_state, reward, done = env.step(action)
-            replay_buffer.add(state, action, reward, next_state, done)
-            agent.train(replay_buffer, batch_size)
+            next_state, _, done = env.step(action)  # Fikset returverdi
+
+            # Bruk den nye belønningsfunksjonen
+            reward = env.reward_function(state, action, next_state)  # ✅ Fikset kall
+
+            replay_buffer.push(state, action, reward, next_state, done)  # ✅ Fikset minnebuffer
+
             state = next_state
-        
-        print(f"Episode {episode} completed.")
+            total_reward += reward
+
+            if done:
+                break
+            
+            print(f"[DEBUG] Episode: {episode}, Epsilon: {agent.epsilon:.4f}, Action: {action}, Reward: {reward}")
+
+        print(f"Episode {episode} completed. Total reward: {total_reward:.2f}")
 
     # === Lagre modellen etter trening ===
     print("🚀 model saved to model.pth...")

@@ -12,7 +12,8 @@ class ReplayBuffer:
     
     def add(self, state, action, reward, next_state, done):
         self.buffer.append((state, action, reward, next_state, done))
-    
+        print(f"[DEBUG] Added to buffer: State: {state}, Action: {action}, Reward: {reward}, Done: {done}")
+
     def sample(self, batch_size):
         batch = random.sample(self.buffer, batch_size)
         states, actions, rewards, next_states, dones = zip(*batch)

@@ -16,7 +16,7 @@ agent.epsilon = 1.0  # Reset epsilon manually after loading model
 
 # Sett opp testmiljøet
 env = SimpleTrackManiaEnv()
-test_episodes = 100
+test_episodes = 1000
 reward_history = []
 
 def evaluate_agent():

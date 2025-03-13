@@ -1,17 +1,2 @@
-# Ignorer Python-cache og midlertidige filer
-__pycache__/
-*.log
-*.tmp
-
-# Ignorer virtuelle miljøer
-venv/
-.env/
-
-# Ignorer store filer og modeller
-*.pth
-*.pkl
-*.h5
-
-# Ignorer systemfiler (Windows/macOS)
-.DS_Store
-Thumbs.db
+__pycache__/ 
+*.pth 
