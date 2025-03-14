@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import os
 import json
+import csv
 
 # Opprett `models/` hvis den ikke finnes
 models_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")
@@ -65,17 +66,20 @@ class SimpleTrackManiaEnv:
         return self.state, reward, self.done
 
     def reward_function(self, state, action, next_state):
-        """Ekstern belønningsfunksjon som kan modifiseres."""
+        """Ekstern belønningsfunksjon med bedre balanse mellom fart og progresjon."""
         pos, speed, _ = next_state
 
-        reward = (next_state[0] - state[0]) * 0.5  # Belønn progresjon
-        reward += next_state[1] * 0.2 if next_state[1] > state[1] else -0.2  # Belønn fart
+        reward = (pos - state[0]) * 0.8  # Økt vekt på progresjon
+        reward += (speed - state[1]) * 0.1  # Mindre vekt på akselerasjon
+        reward -= abs(speed - 5) * 0.05  # Straff for ikke å holde jevn fart
+
         if next_state[1] == 0:  
-            reward -= 5  # Straff for å stoppe
+            reward -= 5  # Straff for full stopp
         if next_state[0] % 10 == 0:  
             reward += 1  # Bonus for sjekkpunkter
 
         return reward
+
 
 def get_latest_session():
     """Hent siste session for å fortsette treningen."""
@@ -86,7 +90,11 @@ def get_latest_session():
     return f"session_{existing_sessions[0]}" if existing_sessions else None
 
 latest_session = get_latest_session()
-if latest_session:
+
+if latest_session is None:
+    print("🆕 No previous sessions found, starting fresh.")
+    session_path = os.path.join(models_dir, "session_1")
+else:
     session_path = os.path.join(models_dir, latest_session)
     model_load_path = os.path.join(session_path, "latest.pth")
     metadata_path = os.path.join(session_path, "metadata.json")
@@ -104,8 +112,6 @@ if latest_session:
         print("✅ Model and metadata loaded!")
     else:
         print("⚠️ No previous model found, starting fresh.")
-else:
-    print("🆕 No previous sessions found, starting fresh.")
 
 
 def train_evo_rl():
@@ -120,21 +126,31 @@ def train_evo_rl():
     agent = Agent(state_dim=3, action_dim=2, epsilon_start=1.0, epsilon_min=0.05, epsilon_decay=0.995)
     replay_buffer = PrioritizedReplayBuffer(capacity=10000, alpha=0.6)
 
+    # 🚀 Bruk GPU hvis tilgjengelig
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    agent.model.to(device)
+
     num_episodes = 1000
     max_timesteps = 200
-    batch_size = 32
+    batch_size = 128  # Økt stabilitet og raskere konvergens
+
+    # Opprett CSV-loggfil
+    log_file = os.path.join(session_path, "training_log.csv")
+    with open(log_file, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Episode", "Total Reward", "Epsilon"])  # CSV-header
 
     for episode in range(num_episodes):
         state = env.reset()
         total_reward = 0
 
         for t in range(max_timesteps):
+            # 🚀 Sørg for at state er på riktig device
+            state_tensor = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
+
+            # Velg handling
             action = agent.select_action(state)
             next_state, _, done = env.step(action)
-
-            if done:  # 🚨 Hvis episoden er ferdig, bryt ut av loopen
-                print(f"Episode {episode}/{num_episodes} completed. Total reward: {total_reward:.2f}, Epsilon: {agent.epsilon:.4f}")
-                break  
 
             # Bruk belønningsfunksjonen
             reward = env.reward_function(state, action, next_state)
@@ -142,47 +158,55 @@ def train_evo_rl():
             # Legg til i replay buffer
             replay_buffer.push(state, action, reward, next_state, done)
 
+            # Tren agenten hvis buffer er stor nok
             if replay_buffer.size() > batch_size:
                 states, actions, rewards, next_states, dones, indices, weights = replay_buffer.sample(batch_size)
                 agent.train(replay_buffer, states, actions, rewards, next_states, dones, indices, weights, batch_size)
 
-
-
             state = next_state
             total_reward += reward
 
-            # Sjekk om denne episoden har høyest reward
-            best_model_path = os.path.join(session_path, "best.pth")
-            metadata_path = os.path.join(session_path, "metadata.json")
+            if done:  # 🚨 Episoden er ferdig, lagre data og gå til neste
+                break  
 
-            if not os.path.exists(metadata_path):
-                best_reward = -float("inf")  # Ingen tidligere reward
-            else:
-                with open(metadata_path, "r") as f:
-                    metadata = json.load(f)
-                best_reward = metadata.get("best_reward", -float("inf"))
+        # 📊 Skriv episodens resultat til CSV etter hver episode
+        with open(log_file, "a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([episode, total_reward, agent.epsilon])
 
-            if total_reward > best_reward:
-                print(f"🏆 New best model found! Reward: {total_reward:.2f}")
-                torch.save(agent.model.state_dict(), best_model_path)
-                best_reward = total_reward
+        print(f"📊 Training log updated: {log_file}")
 
-            # Oppdater metadata
-            metadata = {"epsilon": agent.epsilon, "best_reward": best_reward}
-            with open(metadata_path, "w") as f:
-                json.dump(metadata, f)
+        # 🚀 Sjekk om dette er den beste modellen
+        best_model_path = os.path.join(session_path, "best.pth")
+        metadata_path = os.path.join(session_path, "metadata.json")
 
+        if not os.path.exists(metadata_path):
+            best_reward = -float("inf")  # Ingen tidligere reward
+        else:
+            with open(metadata_path, "r") as f:
+                metadata = json.load(f)
+            best_reward = metadata.get("best_reward", -float("inf"))
 
-       # print(f"Episode {episode} completed. Total reward: {total_reward:.2f}")
+        if total_reward > best_reward:
+            print(f"🏆 New best model found! Reward: {total_reward:.2f}")
+            torch.save(agent.model.state_dict(), best_model_path)
+            best_reward = total_reward
+
+        # Oppdater metadata
+        metadata = {"epsilon": agent.epsilon, "best_reward": best_reward}
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f)
 
     # === Lagre modellen etter trening ===
     model_save_path = os.path.join(session_path, "latest.pth")
-    # Lagre metadata (f.eks. siste epsilon-verdi)
     metadata = {"epsilon": agent.epsilon}
+    
     with open(os.path.join(session_path, "metadata.json"), "w") as f:
         json.dump(metadata, f)
+
     torch.save(agent.model.state_dict(), model_save_path)
     print(f"✅ Model saved to {model_save_path}")
+
 
 def evaluate_agent():
     """Evaluerer den trente agenten uten tilfeldig utforsking (epsilon = 0)."""
