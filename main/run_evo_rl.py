@@ -17,13 +17,15 @@ class SimpleTrackManiaEnv:
     def __init__(self):
         self.max_speed = 10.0
         self.track_length = 100.0
+        self.state = None  # Sikrer at `state` eksisterer
         self.reset()
 
     def reset(self):
         self.position = 0.0
         self.speed = 0.0
         self.done = False
-        return np.array([self.position, self.speed, 0.0])
+        self.state = np.array([self.position, self.speed, 0.0])
+        return self.state
 
     def step(self, action):
         if self.done:
@@ -35,7 +37,8 @@ class SimpleTrackManiaEnv:
             self.speed = max(self.speed - 1.0, 0.0)  
 
         self.position += self.speed  
-        reward = self.reward_function(self.state, action, np.array([self.position, self.speed, 0.0]))
+        new_state = np.array([self.position, self.speed, 0.0])
+        reward = self.reward_function(self.state, action, new_state)  # 🔥 Kaller nå metoden riktig
 
         if self.position >= self.track_length:
             self.done = True
@@ -44,10 +47,11 @@ class SimpleTrackManiaEnv:
             self.done = True
             reward = -5  
 
-        self.state = np.array([self.position, self.speed, 0.0])
+        self.state = new_state
         return self.state, reward, self.done
 
     def reward_function(self, state, action, next_state):
+        """Belønningsfunksjon basert på progresjon, fart og stabilitet."""
         pos, speed, _ = next_state
         reward = (pos - state[0]) * 0.8  
         reward += (speed - state[1]) * 0.1  
@@ -59,6 +63,7 @@ class SimpleTrackManiaEnv:
             reward += 1  
 
         return reward
+
 
 def train_evo_rl():
     session_id = max([int(f.replace("session_", "")) for f in os.listdir(models_dir) if f.startswith("session_")], default=0) + 1
@@ -86,7 +91,8 @@ def train_evo_rl():
             reward = env.reward_function(state, action, next_state)
             replay_buffer.push(state, action, reward, next_state, done)
 
-            if replay_buffer.size() > 128:
+            if replay_buffer.get_size() > 128:
+
                 states, actions, rewards, next_states, dones, indices, weights = replay_buffer.sample(128)
                 agent.train(replay_buffer, states, actions, rewards, next_states, dones, indices, weights, 128)
 

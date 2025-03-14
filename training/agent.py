@@ -1,23 +1,24 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import time
 import random
 import numpy as np
-import os  # 🔹 Viktig! Trengs for filoperasjoner
-from network.model import NeuralNetwork
+import os
 import torch.nn.functional as F
+from network.model import NeuralNetwork
 
 class Agent:
     def __init__(self, state_dim, action_dim, lr=0.001, epsilon_start=1.0, epsilon_min=0.01, epsilon_decay=0.997):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = NeuralNetwork(state_dim, action_dim).to(self.device)  # ✅ Modellen er på GPU fra start
+        self.model = NeuralNetwork(state_dim, action_dim).to(self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
         self.criterion = nn.MSELoss()
-        
+
         # Epsilon-parametere
         self.epsilon = epsilon_start
-        self.epsilon_min = 0.10  # Øker minimumsverdien for å sikre utforskning
-        self.epsilon_decay = 0.999  # Gjør nedgangen enda tregere
+        self.epsilon_min = epsilon_min
+        self.epsilon_decay = epsilon_decay
         print(f"[DEBUG] Initial epsilon: {self.epsilon:.4f}, Min: {self.epsilon_min:.4f}, Decay: {self.epsilon_decay:.4f}")
 
         self.load_latest_model()  # 🔹 Flyttet modellinnlasting til egen funksjon
@@ -87,7 +88,6 @@ class Agent:
         if torch.max(current_q_values).item() > 1e6:
             print(f"🚨 Advarsel: Q-verdi eksploderer! {torch.max(current_q_values).item()}")
 
-
         # Beregn TD-error og oppdater Prioritized Replay Buffer
         td_errors = (current_q_values - target_q_values.detach()).squeeze().abs().detach().cpu().numpy()
         replay_buffer.update_priorities(indices, td_errors)
@@ -95,6 +95,12 @@ class Agent:
         # Beregn loss med vekting fra PER
         loss = (weights_tensor * (current_q_values - target_q_values.detach())**2).mean()
         
+        # 🔥 Start tidtaking for backpropagation
+        start_time = time.time()
+
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+
+        # ⏳ Print treningsbatchens tid
+        print(f"⏳ Batch train time: {time.time() - start_time:.4f}s")
