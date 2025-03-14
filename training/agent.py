@@ -5,10 +5,12 @@ import random
 import numpy as np
 import os  # 🔹 Viktig! Trengs for filoperasjoner
 from network.model import NeuralNetwork
+import torch.nn.functional as F
 
 class Agent:
     def __init__(self, state_dim, action_dim, lr=0.001, epsilon_start=1.0, epsilon_min=0.01, epsilon_decay=0.997):
-        self.model = NeuralNetwork(state_dim, action_dim)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = NeuralNetwork(state_dim, action_dim).to(self.device)  # ✅ Modellen er på GPU fra start
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
         self.criterion = nn.MSELoss()
         
@@ -22,7 +24,7 @@ class Agent:
 
     def get_latest_model(self):
         """Henter siste tilgjengelige modell for automatisk opplasting."""
-        if not os.path.exists("models"):  # 🔹 Unngå krasj hvis 'models/' ikke finnes
+        if not os.path.exists("models"):
             return None
 
         existing_sessions = sorted(
@@ -42,42 +44,53 @@ class Agent:
         """Laster inn den nyeste modellen hvis en finnes."""
         latest_model = self.get_latest_model()
         if latest_model:
-            self.model.load_state_dict(torch.load(latest_model))
+            self.model.load_state_dict(torch.load(latest_model, map_location=self.device))  # ✅ Laster rett til GPU/CPU
             print("✅ Model loaded successfully!")
         else:
             print("🆕 No previous model found. Training from scratch.")
 
     def select_action(self, state):
-        """Epsilon-greedy action selection with dynamic decay."""
-        if random.random() < self.epsilon:
-            action = random.randint(0, 1)  # Utforskning
-        else:
-            state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
-            action = torch.argmax(self.model(state_tensor)).item()
+        """Forbedret handlingvalg med entropy-styrt utforskning."""
+        state_tensor = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)  # ✅ Riktig enhet
 
-        # Decay epsilon
+        with torch.no_grad():
+            q_values = self.model(state_tensor)
+
+        # Utforskning vs utnyttelse med entropy-vekting
+        if random.random() < self.epsilon:
+            action = random.randint(0, q_values.shape[1] - 1)  # Utforskning
+        else:
+            probs = F.softmax(q_values / (self.epsilon + 1e-5), dim=1)
+            action = torch.multinomial(probs, num_samples=1).item()  
+
         self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
 
         return action
 
     def train(self, replay_buffer, states, actions, rewards, next_states, dones, indices, weights, batch_size, gamma=0.99):
         """Trener agenten basert på samples fra Prioritized Experience Replay."""
-
-        states_tensor = torch.tensor(states, dtype=torch.float32)
-        actions_tensor = torch.tensor(actions, dtype=torch.long).unsqueeze(1)
-        rewards_tensor = torch.tensor(rewards, dtype=torch.float32).unsqueeze(1)
-        next_states_tensor = torch.tensor(next_states, dtype=torch.float32)
-        dones_tensor = torch.tensor(dones, dtype=torch.float32).unsqueeze(1)
-        weights_tensor = torch.tensor(weights, dtype=torch.float32).unsqueeze(1)
+        
+        # ✅ Alle tensorer sendes til GPU/CPU basert på tilgjengelig enhet
+        states_tensor = torch.tensor(states, dtype=torch.float32, device=self.device)
+        actions_tensor = torch.tensor(actions, dtype=torch.long, device=self.device).unsqueeze(1)
+        rewards_tensor = torch.tensor(rewards, dtype=torch.float32, device=self.device).unsqueeze(1)
+        next_states_tensor = torch.tensor(next_states, dtype=torch.float32, device=self.device)
+        dones_tensor = torch.tensor(dones, dtype=torch.float32, device=self.device).unsqueeze(1)
+        weights_tensor = torch.tensor(weights, dtype=torch.float32, device=self.device).unsqueeze(1)
 
         # Beregn Q-verdier
         current_q_values = self.model(states_tensor).gather(1, actions_tensor)
         next_q_values = self.model(next_states_tensor).max(1, keepdim=True)[0]
         target_q_values = rewards_tensor + gamma * next_q_values * (1 - dones_tensor)
 
+        # 🚨 Sjekk for ekstremt høye Q-verdier
+        if torch.max(current_q_values).item() > 1e6:
+            print(f"🚨 Advarsel: Q-verdi eksploderer! {torch.max(current_q_values).item()}")
+
+
         # Beregn TD-error og oppdater Prioritized Replay Buffer
-        td_errors = (current_q_values - target_q_values.detach()).squeeze().abs().cpu().detach().numpy()
-        replay_buffer.update_priorities(indices, td_errors)  # ✅ Nå fungerer dette
+        td_errors = (current_q_values - target_q_values.detach()).squeeze().abs().detach().cpu().numpy()
+        replay_buffer.update_priorities(indices, td_errors)
 
         # Beregn loss med vekting fra PER
         loss = (weights_tensor * (current_q_values - target_q_values.detach())**2).mean()
